@@ -1,0 +1,10 @@
+name: devrel-metrics
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - jupyter
+  - matplotlib
+  - numpy
+  - pandas
+  - requests
