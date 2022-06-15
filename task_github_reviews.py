@@ -11,12 +11,14 @@ env = repo_init.start()
 
 # COMMAND ----------
 
+# widget for temporal scope
 dbutils.widgets.dropdown(
     name="scope", defaultValue="new only", choices=["new only", "all"]
 )
 
 # COMMAND ----------
 
+# get data from api
 if dbutils.widgets.get("scope") == "all":
     get_full_history = True
 else:
@@ -26,23 +28,21 @@ reviews_history = utl.get_reviews_history(get_full_history=get_full_history)
 
 # COMMAND ----------
 
-# put reviews into dataframe
-df_reviews = utl.get_reviews_dataframe(reviews_history)
+# put into dataframe
+df_reviews_new = utl.get_reviews_dataframe(reviews_history)
 
 # COMMAND ----------
 
-# convert to spark / sql
-if not len(df_reviews) > 0:
-    raise ValueError("No new reviews since last update.")
-
-df_spark = spark.createDataFrame(df_reviews)
-df_spark.createOrReplaceTempView("reviews_table")
+# put into a tmp table
+df_new = spark.createDataFrame(df_reviews_new)
+df_new.createOrReplaceTempView("new_reviews")
 
 # COMMAND ----------
 
-if get_full_history:
+# drop and rebuild or insert into existing hive table
+if get_full_history:    
     sql = """drop table if exists github.reviews"""
-    print("Dropping reviews table to rebuild reviews history.")
+    print("Dropping existing reviews table and rebuilding.")
     spark.sql(sql)
     sql = """
         create table if not exists github.reviews (
@@ -56,11 +56,18 @@ if get_full_history:
         ) comment 'GitHub reviews in OSS repo'
     """
     spark.sql(sql)
+    
+    print("Inserting all reviews into reviews table.")
+    sql = """insert into github.reviews select distinct * from new_reviews"""
+    spark.sql(sql)
+    
 else:
-    print("Inserting new reviews into reviews table.")
-
-# COMMAND ----------
-
-# insert into table
-sql = """insert into github.reviews select * from reviews_table"""
-spark.sql(sql)
+    print("Inserting only new reviews into existing reviews table.")
+    sql = """ 
+        insert into github.reviews
+        select n.* from new_reviews as n
+        left join github.reviews as o 
+        on n.review_id = o.review_id
+        where o.review_id is null
+        """
+    spark.sql(sql)

@@ -5,7 +5,8 @@
 # COMMAND ----------
 
 import repo_utilities as utl
-import repo_init 
+import repo_init
+
 env = repo_init.start()
 
 # COMMAND ----------
@@ -18,7 +19,7 @@ issues_history = utl.get_issues_history()
 # get as pd dataframe
 df_issues = utl.get_issues_dataframe(issues_history)
 
-#convert to spark / sql
+# convert to spark / sql
 df_spark = spark.createDataFrame(df_issues)
 df_spark.createOrReplaceTempView("issues_table")
 
@@ -32,7 +33,7 @@ spark.sql(sql)
 sql = """
 create table if not exists github.issues (
   issue_number int comment "GitHub issue number",
-  is_pull_request int comment "True if issue is a pull request",
+  is_pull_request boolean comment "True if issue is a pull request",
   title string comment "Issue title",
   user_id string comment "GitHub user id",
   user_name string comment "GitHub user login name",

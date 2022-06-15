@@ -169,10 +169,16 @@ def get_pulls_history(**kwargs):
     get entire history of pull requests
     """
     pull_history = []
-    query_params = get_pulls_query_params(**kwargs)
+    
+    if not "params" in kwargs:
+        query_params = get_pulls_query_params(**kwargs)
+    else:
+        query_params = kwargs["params"]
+        
     page_counter = 1
     last_page = False
     pulls = []
+    
     while not last_page:
         r = send_request_to_github_api("pulls", False, params=query_params)
         pull_history.extend(r.json())
@@ -405,6 +411,10 @@ def get_issues_query_params(**kwargs):
             elif k == "since":
                 if not kwargs["params"].get(k).endswith("Z"):
                     v = f"{v}T00:00:00Z"
+            elif k == "pulls":
+                assert (
+                    kwargs["params"].get(k) in ["true", "false"]
+                ), f"{k} must be 'true' or 'false'."
             query_params.update({k: v})
         return query_params
 
@@ -414,7 +424,10 @@ def get_issues_history(**kwargs):
     get entire history of issues
     """
     history = []
-    query_params = get_issues_query_params(**kwargs)
+    if not "params" in kwargs:
+        query_params = get_pulls_query_params(**kwargs)
+    else:
+        query_params = kwargs["params"]
     page_counter = 1
     last_page = False
     pulls = []
@@ -467,36 +480,33 @@ def get_issues_dataframe(issues_history, core_team=core_team):
     return pd.DataFrame(lst)
 
 
-def get_comments_history(core_team=core_team, get_full_history=False):
+def get_comments_history(get_full_history=False):
+    """
+    get selected reviews info from api calls to issues/{issue_number}/comments
+    """
 
     spark = SparkSession.builder.getOrCreate()
 
     if get_full_history:
-        since = "2020-12-01T00:00:00Z"
-        params = get_issues_query_params(params={"since": since})
+        sql = """ 
+            select distinct issue_number 
+            from github.issues 
+        """
+        issues = [r[0] for r in spark.sql(sql).collect()]
     else:
-        spark = SparkSession.builder.getOrCreate()
-        sql = """select max(created_ts) from github.issues"""
-        ts = spark.sql(sql).collect()[0][0]
-        since = datetime.datetime.strftime(ts, "%Y-%m-%dT%H:%M:%SZ")
-        params = get_issues_query_params(params={"since": since})
-
-    sql = """
-    select distinct issue_number from github.issues where created_ts > '{0}' 
-    """
-    sql = sql.format(since)
-    issues = [r[0] for r in spark.sql(sql).collect()]
-
+        sql = """
+            select distinct issue_number 
+            from github.issues 
+            where updated_ts >= (select max(updated_ts) from github.comments)
+        """
+        issues = [r[0] for r in spark.sql(sql).collect()]
+        
     lst_outer = []
     for i in issues:
-
         comments_url = f"{repo}/issues/{i}/comments"
-        response = send_request_to_github_api(comments_url, True, params=params)
-
+        response = send_request_to_github_api(comments_url, True)
         lst_inner = []
-
         for c in response:
-
             if is_bot(c):
                 pass
             else:
@@ -531,34 +541,34 @@ def get_comments_dataframe(comments_history):
 
 
 def get_reviews_history(get_full_history=False):
+    """
+    get selected reviews info from api calls to pulls/{pull_number}/reviews
+    """
 
     spark = SparkSession.builder.getOrCreate()
 
     if get_full_history:
-        since = "2020-12-01T00:00:00Z"
-        params = get_issues_query_params(params={"since": since})
+        sql = """ 
+            select distinct pull_number 
+            from github.pulls
+        """
+        issues = [r[0] for r in spark.sql(sql).collect()]
+        
     else:
-        sql = """select max(created_ts) from github.pulls"""
-        ts = spark.sql(sql).collect()[0][0]
-        since = datetime.datetime.strftime(ts, "%Y-%m-%dT%H:%M:%SZ")
-        params = get_issues_query_params(params={"since": since})
-
-    sql = """
-    select distinct pull_number from github.pulls where created_ts > '{0}' 
-    """
-    sql = sql.format(since)
-    issues = [r[0] for r in spark.sql(sql).collect()]
+        sql = """
+            select distinct issue_number 
+            from github.issues 
+            where is_pull_request 
+            and updated_ts >= (select max(submitted_ts) from github.reviews)
+        """
+        issues = [r[0] for r in spark.sql(sql).collect()]
 
     lst_outer = []
     for i in issues:
-
         reviews_url = f"{repo}/pulls/{i}/reviews"
-        response = send_request_to_github_api(reviews_url, True, params=params)
-
+        response = send_request_to_github_api(reviews_url, True)
         lst_inner = []
-
         for r in response:
-
             lst_inner.append(
                 {
                     "review_id": r["id"],
@@ -567,10 +577,9 @@ def get_reviews_history(get_full_history=False):
                     "user_name": r["user"]["login"],
                     "user_is_core": is_core_team_member(r),
                     "status": r["state"],
-                    "submitted_ts": dt_converter(r["submitted_at"]),
+                    "submitted_ts": dt_converter(r["submitted_at"])
                 }
             )
-
             lst_outer.append(lst_inner)
 
     return lst_outer
@@ -580,7 +589,6 @@ def get_reviews_dataframe(reviews_history):
     """
     unpack reviews in reviews_history api reponse and put into dataframe
     """
-    import pandas as pd
 
     payload = []
     for lst in reviews_history:
