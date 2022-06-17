@@ -9,6 +9,8 @@ import pandas as pd
 import pickle
 import re
 import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
 
 @dataclass
@@ -52,7 +54,6 @@ def send_request_to_github_api(which_url, return_as_json=True, **kwargs):
 
     git_auth_tuple = get_default_creds()
     headers = {"Accept": "application/vnd.github.v3+json"}
-
     git_auth_tuple = get_default_creds()
 
     if "params" in kwargs:
@@ -61,14 +62,24 @@ def send_request_to_github_api(which_url, return_as_json=True, **kwargs):
         query_params = params
     else:
         query_params = {}
+        
+    retry_strategy = Retry(
+    total=5,
+    status_forcelist=[202, 429, 500, 502, 503, 504],
+    method_whitelist=["HEAD", "GET", "OPTIONS"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    http = requests.Session()
+    http.mount("https://", adapter)
 
-    response = requests.get(
+    response = http.get(
         url, params=query_params, auth=git_auth_tuple, headers=headers
     )
 
-    if not response.status_code in [200, 202]:
+    if not response.status_code == 200:
         msg = f"Response failed with status code {response.status_code}"
         raise Exception(msg)
+        
     elif not return_as_json:
         return response
     else:
