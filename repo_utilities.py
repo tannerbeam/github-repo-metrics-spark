@@ -27,9 +27,10 @@ contributors = GitUrl("contributors", f"{repo}/stats/contributors")
 collaborators = GitUrl("collaborators", f"{repo}/collaborators")
 pulls = GitUrl("pulls", f"{repo}/pulls")
 issues = GitUrl("issues", f"{repo}/issues")
+releases = GitUrl("releases", f"{repo}/releases")
 git_url_names = [
     gu.name
-    for gu in [sc_members, ge_members, contributors, collaborators, pulls, issues]
+    for gu in [sc_members, ge_members, contributors, collaborators, pulls, issues, releases]
 ]
 
 
@@ -172,6 +173,54 @@ def get_pulls_dataframe(pull_history, core_team=core_team):
     df["merged_ts"] = df["merged_ts"].apply(dt_converter)
     df["closed_ts"] = df["closed_ts"].apply(dt_converter)
 
+    return df
+
+
+def get_release_history():
+    history = []
+    page_counter = 1
+    last_page = False
+    query_params = {"page": "1", "per_page": 100}
+    while not last_page:
+        r = send_request_to_github_api("releases", False, params=query_params)
+        history.extend(r.json())
+        if "next" in r.links:
+            page_counter += 1
+            query_params["page"] = str(page_counter)
+        else:
+            last_page = True
+            print(f"Finished on page {page_counter}")
+    return history
+
+
+def get_releases_dataframe(release_history): 
+    df = pd.DataFrame(
+        [
+            {
+                "version": r["tag_name"], 
+                "name": r["name"], 
+                 "ts": dt_converter(r["published_at"])
+            } for r in release_history
+        ]
+    )
+    df["ts"] = df.ts.apply(lambda x: x.date())
+    msk = np.where(df.version.str.startswith("v"))
+    df.version.iloc[msk] = df.version.str.replace("v","").iloc[msk]
+
+    # use name if tag_name has long hex strings
+    msk = np.where(df.version.str.contains("[a-f]+"))
+    df.version.iloc[msk] = df.name.iloc[msk]
+
+    df = df[~df.version.str.contains("[a-z]")]
+    df = df[~df.ts.isnull()]
+
+    pat = r"^([0-1])\.(\d{1,2})\.(\d{1,2})"
+    df["l1"] = df.version.apply(lambda x: int(re.search(pat, x).group(1)))
+    df["l2"] = df.version.apply(lambda x: int(re.search(pat, x).group(2)))
+    df["l3"] = df.version.apply(lambda x: int(re.search(pat, x).group(3)))
+    df.sort_values(by = ["l1", "l2", "l3"], ascending = False, inplace = True)
+    df = df.filter(items = ["version", "released", "l1", "l2", "l3"])
+    
     return df
 
 
