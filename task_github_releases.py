@@ -30,6 +30,7 @@ spark.sql(sql)
 sql = """
 create table if not exists github.releases (
     version string comment "GX release version", 
+    release_dt date comment "GX version release date",
     major int comment "GX version major release number <major.minor.patch>", 
     minor int comment "GX version minor release number <major.minor.patch>", 
     patch int comment "GX version patch release number <major.minor.patch>"

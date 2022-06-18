@@ -195,32 +195,39 @@ def get_release_history():
 
 def get_releases_dataframe(release_history): 
     df = pd.DataFrame(
-        [
-            {
-                "version": r["tag_name"], 
-                "name": r["name"], 
-                 "ts": dt_converter(r["published_at"])
-            } for r in release_history
-        ]
+    [
+        {
+            "version": r["tag_name"], 
+            "name": r["name"], 
+             "release_dt": dt_converter(r["published_at"])
+        } for r in release_history
+    ]
     )
-    df["ts"] = df.ts.apply(lambda x: x.date())
-    msk = np.where(df.version.str.startswith("v"))
-    df.version.iloc[msk] = df.version.str.replace("v","").iloc[msk]
-
-    # use name if tag_name has long hex strings
-    msk = np.where(df.version.str.contains("[a-f]+"))
-    df.version.iloc[msk] = df.name.iloc[msk]
-
-    df = df[~df.version.str.contains("[a-z]")]
-    df = df[~df.ts.isnull()]
-
+    df["release_dt"] = df.release_dt.apply(lambda x: x.date())
+    df["version"] = np.where(
+        df.version.str.startswith("v"), 
+        df.version.str.replace("v",""), 
+        df.version
+    )
+    df["version"] = np.where(
+        df.version.str.contains("[a-f]+"), 
+        df.name,
+        df.version
+    )
+    df = df.query("~version.str.contains('[a-z]')").query("~release_dt.isnull()")
     pat = r"^([0-1])\.(\d{1,2})\.(\d{1,2})"
-    df["major"] = df.version.apply(lambda x: int(re.search(pat, x).group(1)))
-    df["minor"] = df.version.apply(lambda x: int(re.search(pat, x).group(2)))
-    df["patch"] = df.version.apply(lambda x: int(re.search(pat, x).group(3)))
-    df.sort_values(by = ["major", "minor", "patch"], ascending = False, inplace = True)
-    df = df.filter(items = ["version", "released", "major", "minor", "patch"])
-    
+    matches = df.version.apply(lambda x: re.search(pat, x))
+    [m.group(1) for m in matches]
+    df["major"] = [m.group(1) for m in matches]
+    df["minor"] = [m.group(2) for m in matches]
+    df["patch"] = [m.group(3) for m in matches]
+    cols = df.columns[df.columns != "name"]
+    df = df.filter(items = cols)
+    df.sort_values(
+        by = ["major", "minor", "patch"], 
+        ascending = [False, False, False], 
+        inplace = True
+    )
     return df
 
 
