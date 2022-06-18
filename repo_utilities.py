@@ -215,11 +215,11 @@ def get_releases_dataframe(release_history):
     df = df[~df.ts.isnull()]
 
     pat = r"^([0-1])\.(\d{1,2})\.(\d{1,2})"
-    df["l1"] = df.version.apply(lambda x: int(re.search(pat, x).group(1)))
-    df["l2"] = df.version.apply(lambda x: int(re.search(pat, x).group(2)))
-    df["l3"] = df.version.apply(lambda x: int(re.search(pat, x).group(3)))
-    df.sort_values(by = ["l1", "l2", "l3"], ascending = False, inplace = True)
-    df = df.filter(items = ["version", "released", "l1", "l2", "l3"])
+    df["major"] = df.version.apply(lambda x: int(re.search(pat, x).group(1)))
+    df["minor"] = df.version.apply(lambda x: int(re.search(pat, x).group(2)))
+    df["patch"] = df.version.apply(lambda x: int(re.search(pat, x).group(3)))
+    df.sort_values(by = ["major", "minor", "patch"], ascending = False, inplace = True)
+    df = df.filter(items = ["version", "released", "major", "minor", "patch"])
     
     return df
 
