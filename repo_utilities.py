@@ -65,9 +65,9 @@ def send_request_to_github_api(which_url, return_as_json=True, **kwargs):
         query_params = {}
         
     retry_strategy = Retry(
-    total=5,
-    status_forcelist=[202, 429, 500, 502, 503, 504],
-    method_whitelist=["HEAD", "GET", "OPTIONS"]
+    total=10,
+    backoff_factor=5.0,
+    status_forcelist=[202, 429, 500, 502, 503, 504]
     )
     adapter = HTTPAdapter(max_retries=retry_strategy)
     http = requests.Session()
