@@ -39,7 +39,7 @@ def get_default_creds() -> tuple:
     dbutils = DBUtils(spark)
     git_user = "Super-Tanner"
     git_token = dbutils.secrets.get(
-        scope="analytics_pipeline", key="tanner_github_private_repo_access"
+        scope="analytics_pipeline", key="tanner_github_api"
     )
     return (git_user, git_token)
 
@@ -54,7 +54,7 @@ def send_request_to_github_api(which_url, return_as_json=True, **kwargs):
         url = which_url
 
     git_auth_tuple = get_default_creds()
-    headers = {"Accept": "application/vnd.github.v3+json"}
+    headers = {"Accept": "application/vnd.github.raw+json"}
     git_auth_tuple = get_default_creds()
 
     if "params" in kwargs:
