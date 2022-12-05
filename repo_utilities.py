@@ -21,8 +21,8 @@ class GitUrl:
 
 api = "https://api.github.com"
 repo = f"{api}/repos/great-expectations/great_expectations"
-sc_members = GitUrl("sc_members", f"{api}/orgs/superconductive/members")
-ge_members = GitUrl("ge_members", f"{api}/orgs/great-expectations/members")
+gxl_members = GitUrl("gxl_members", f"{api}/orgs/greatexpectationslabs/members")
+gx_members = GitUrl("gx_members", f"{api}/orgs/great-expectations/members")
 contributors = GitUrl("contributors", f"{repo}/stats/contributors")
 collaborators = GitUrl("collaborators", f"{repo}/collaborators")
 pulls = GitUrl("pulls", f"{repo}/pulls")
@@ -30,14 +30,14 @@ issues = GitUrl("issues", f"{repo}/issues")
 releases = GitUrl("releases", f"{repo}/releases")
 git_url_names = [
     gu.name
-    for gu in [sc_members, ge_members, contributors, collaborators, pulls, issues, releases]
+    for gu in [gxl_members, gx_members, contributors, collaborators, pulls, issues, releases]
 ]
 
 
 def get_default_creds() -> tuple:
     spark = SparkSession.builder.getOrCreate()
     dbutils = DBUtils(spark)
-    git_user = "Super-Tanner"
+    git_user = "tannerbeam"
     git_token = dbutils.secrets.get(
         scope="analytics_pipeline", key="tanner_github_api"
     )
@@ -88,9 +88,9 @@ def send_request_to_github_api(which_url, return_as_json=True, **kwargs):
 
 
 def get_core_team_members():
-    response_sc = send_request_to_github_api("sc_members")
-    response_ge = send_request_to_github_api("ge_members")
-    exclude = [r["login"] for r in response_ge + response_sc]
+    response_gxl = send_request_to_github_api("gxl_members")
+    response_gx = send_request_to_github_api("gx_members")
+    exclude = [r["login"] for r in response_gxl + response_gx]
     also_exclude = [
         "jpcampb2",
         "spbail-ge",
@@ -100,6 +100,7 @@ def get_core_team_members():
         "gilpasternak35",
         "snyk-bot",
         "dependabot",
+        "Super-Tanner"
     ]
     return list(set(exclude + also_exclude))
 
