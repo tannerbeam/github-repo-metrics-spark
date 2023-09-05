@@ -11,6 +11,12 @@ import re
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
+from typing import Optional, Tuple
+
+
+# spark session (required for secrets utility)
+spark = SparkSession.builder.getOrCreate()
+dbutils = DBUtils(spark)
 
 
 @dataclass
@@ -30,21 +36,42 @@ issues = GitUrl("issues", f"{repo}/issues")
 releases = GitUrl("releases", f"{repo}/releases")
 git_url_names = [
     gu.name
-    for gu in [gxl_members, gx_members, contributors, collaborators, pulls, issues, releases]
+    for gu in [
+        gxl_members,
+        gx_members,
+        contributors,
+        collaborators,
+        pulls,
+        issues,
+        releases,
+    ]
 ]
 
 
-def get_default_creds() -> tuple:
-    spark = SparkSession.builder.getOrCreate()
-    dbutils = DBUtils(spark)
-    git_user = "tannerbeam"
-    git_token = dbutils.secrets.get(
-        scope="analytics_pipeline", key="tanner_github_api"
-    )
-    return (git_user, git_token)
+def git_access_tuple_from_databricks_secrets(
+    secret_scope: Optional[str] = None, secret_key: Optional[str] = None
+) -> Tuple[str, str]:
+    """
+    Get a tuple of (user, token) to use for authenticating GitHub API requests.
+    Specify the databricks secret scope and the key for the scope.
+    """
+
+    # default credentials
+    secret_scope = "github" if not secret_scope else secret_scope
+    secret_key = "tiny-tim-bot" if not secret_key else secret_key
+
+    secret_token = dbutils.secrets.get(scope=secret_scope, key=secret_key)
+
+    return (secret_key, secret_token)
 
 
-def send_request_to_github_api(which_url, return_as_json=True, **kwargs):
+def send_request_to_github_api(
+    which_url: str,
+    return_as_json: bool = True,
+    headers: Optional[dict[str]] = None,
+    git_auth_tuple: Optional[Tuple[str, str]] = None,
+    **kwargs
+):
     """
     helper function for non-paginated github api request
     """
@@ -53,9 +80,11 @@ def send_request_to_github_api(which_url, return_as_json=True, **kwargs):
     else:
         url = which_url
 
-    git_auth_tuple = get_default_creds()
-    headers = {"Accept": "application/vnd.github.raw+json"}
-    git_auth_tuple = get_default_creds()
+    if not headers:
+        headers = {"Accept": "application/vnd.github.raw+json"}
+
+    if not git_auth_tuple:
+        auth_tuple = git_access_tuple_from_databricks_secrets()
 
     if "params" in kwargs:
         params = kwargs["params"]
@@ -63,24 +92,20 @@ def send_request_to_github_api(which_url, return_as_json=True, **kwargs):
         query_params = params
     else:
         query_params = {}
-        
+
     retry_strategy = Retry(
-    total=10,
-    backoff_factor=5.0,
-    status_forcelist=[202, 429, 500, 502, 503, 504]
+        total=10, backoff_factor=5.0, status_forcelist=[202, 429, 500, 502, 503, 504]
     )
     adapter = HTTPAdapter(max_retries=retry_strategy)
     http = requests.Session()
     http.mount("https://", adapter)
 
-    response = http.get(
-        url, params=query_params, auth=git_auth_tuple, headers=headers
-    )
+    response = http.get(url, params=query_params, auth=auth_tuple, headers=headers)
 
     if not response.status_code == 200:
         msg = f"Response failed with status code {response.status_code}"
         raise Exception(msg)
-        
+
     elif not return_as_json:
         return response
     else:
@@ -100,7 +125,7 @@ def get_core_team_members():
         "gilpasternak35",
         "snyk-bot",
         "dependabot",
-        "Super-Tanner"
+        "Super-Tanner",
     ]
     return list(set(exclude + also_exclude))
 
@@ -116,7 +141,7 @@ def dt_converter(dt_string):
         return datetime.datetime.strptime(dt_string, "%Y-%m-%dT%H:%M:%SZ")
 
 
-def is_core_team_member(r, use_author = False):
+def is_core_team_member(r, use_author=False):
     if not use_author:
         if r["user"]["login"] in core_team:
             return True
@@ -128,7 +153,7 @@ def is_core_team_member(r, use_author = False):
         else:
             return False
 
-        
+
 def is_bot(r):
     if r["user"]["type"] == "Bot":
         return True
@@ -194,27 +219,22 @@ def get_release_history():
     return history
 
 
-def get_releases_dataframe(release_history): 
+def get_releases_dataframe(release_history):
     df = pd.DataFrame(
-    [
-        {
-            "version": r["tag_name"], 
-            "name": r["name"], 
-             "release_dt": dt_converter(r["published_at"])
-        } for r in release_history
-    ]
+        [
+            {
+                "version": r["tag_name"],
+                "name": r["name"],
+                "release_dt": dt_converter(r["published_at"]),
+            }
+            for r in release_history
+        ]
     )
     df["release_dt"] = df.release_dt.apply(lambda x: x.date())
     df["version"] = np.where(
-        df.version.str.startswith("v"), 
-        df.version.str.replace("v",""), 
-        df.version
+        df.version.str.startswith("v"), df.version.str.replace("v", ""), df.version
     )
-    df["version"] = np.where(
-        df.version.str.contains("[a-f]+"), 
-        df.name,
-        df.version
-    )
+    df["version"] = np.where(df.version.str.contains("[a-f]+"), df.name, df.version)
     df = df.query("~version.str.contains('[a-z]')").query("~release_dt.isnull()")
     pat = r"^([0-1])\.(\d{1,2})\.(\d{1,2})"
     matches = df.version.apply(lambda x: re.search(pat, x))
@@ -223,11 +243,9 @@ def get_releases_dataframe(release_history):
     df["minor"] = [m.group(2) for m in matches]
     df["patch"] = [m.group(3) for m in matches]
     cols = df.columns[df.columns != "name"]
-    df = df.filter(items = cols)
+    df = df.filter(items=cols)
     df.sort_values(
-        by = ["major", "minor", "patch"], 
-        ascending = [False, False, False], 
-        inplace = True
+        by=["major", "minor", "patch"], ascending=[False, False, False], inplace=True
     )
     return df
 
@@ -237,16 +255,16 @@ def get_pulls_history(**kwargs):
     get entire history of pull requests
     """
     pull_history = []
-    
+
     if not "params" in kwargs:
         query_params = get_pulls_query_params(**kwargs)
     else:
         query_params = kwargs["params"]
-        
+
     page_counter = 1
     last_page = False
     pulls = []
-    
+
     while not last_page:
         r = send_request_to_github_api("pulls", False, params=query_params)
         pull_history.extend(r.json())
@@ -316,7 +334,7 @@ def get_contributors_dataframe(responses, core_team=core_team):
         payload = {
             "user_name": ([f"{r['author']['login']}"] * len(weeks)),
             "user_id": ([f"{r['author']['id']}"] * len(weeks)),
-            "user_is_core": is_core_team_member(r, use_author = True),
+            "user_is_core": is_core_team_member(r, use_author=True),
             "week": weeks,
             "adds": [d["a"] for d in r["weeks"]],
             "deletes": [d["d"] for d in r["weeks"]],
@@ -408,12 +426,11 @@ def get_contributors_weeks_dataframe(df, df_to_merge):
     )
     df_out = df_merged[df_merged.week >= df_merged.first_week]
     keep = df_out.columns[df_out.columns != "first_week"]
-    df_out = df_out.filter(items = keep, axis = 1)
+    df_out = df_out.filter(items=keep, axis=1)
     df_out = df_out.sort_values(
-        by = ["week", "commits"], 
-        ascending = [False, False]
-    ).reset_index(drop = True)
-    
+        by=["week", "commits"], ascending=[False, False]
+    ).reset_index(drop=True)
+
     return df_out
 
 
@@ -480,9 +497,10 @@ def get_issues_query_params(**kwargs):
                 if not kwargs["params"].get(k).endswith("Z"):
                     v = f"{v}T00:00:00Z"
             elif k == "pulls":
-                assert (
-                    kwargs["params"].get(k) in ["true", "false"]
-                ), f"{k} must be 'true' or 'false'."
+                assert kwargs["params"].get(k) in [
+                    "true",
+                    "false",
+                ], f"{k} must be 'true' or 'false'."
             query_params.update({k: v})
         return query_params
 
@@ -568,7 +586,7 @@ def get_comments_history(get_full_history=False):
             where updated_ts >= (select max(updated_ts) from github.comments)
         """
         issues = [r[0] for r in spark.sql(sql).collect()]
-        
+
     lst_outer = []
     for i in issues:
         comments_url = f"{repo}/issues/{i}/comments"
@@ -621,7 +639,7 @@ def get_reviews_history(get_full_history=False):
             from github.pulls
         """
         issues = [r[0] for r in spark.sql(sql).collect()]
-        
+
     else:
         sql = """
             select distinct issue_number 
@@ -645,7 +663,7 @@ def get_reviews_history(get_full_history=False):
                     "user_name": r["user"]["login"],
                     "user_is_core": is_core_team_member(r),
                     "status": r["state"],
-                    "submitted_ts": dt_converter(r["submitted_at"])
+                    "submitted_ts": dt_converter(r["submitted_at"]),
                 }
             )
             lst_outer.append(lst_inner)
