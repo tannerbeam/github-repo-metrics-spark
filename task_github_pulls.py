@@ -5,8 +5,6 @@
 # COMMAND ----------
 
 import repo_utilities as utl
-import repo_init
-env = repo_init.start()
 
 # COMMAND ----------
 
