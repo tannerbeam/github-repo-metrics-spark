@@ -40,15 +40,3 @@ insert into github.releases
 select * from releases
 """
 spark.sql(sql)
-
-# duplicate to reference table for convenience
-sql = """
-drop table if exists reference.ge_versions
-"""
-spark.sql(sql)
-
-sql = """
-create table if not exists reference.ge_versions as 
-select * from github.releases
-"""
-spark.sql(sql)
