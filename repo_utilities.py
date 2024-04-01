@@ -70,7 +70,7 @@ def send_request_to_github_api(
     return_as_json: bool = True,
     headers: Optional[dict[str]] = None,
     git_auth_tuple: Optional[Tuple[str, str]] = None,
-    **kwargs
+    **kwargs,
 ):
     """
     helper function for non-paginated github api request
@@ -202,7 +202,10 @@ def get_pulls_dataframe(pull_history, core_team=core_team):
     return df
 
 
-def get_release_history():
+def get_release_history() -> list:
+    """
+    Get entire history of releases from api
+    """
     history = []
     page_counter = 1
     last_page = False
@@ -219,35 +222,64 @@ def get_release_history():
     return history
 
 
-def get_releases_dataframe(release_history):
+def parse_semantic_version(
+    df: pd.DataFrame,
+    colname: str = "version",
+    version_regex: str = r"^([0-1])\.(\d{1,2})\.(\d{1,2}[abc]?[0-9]?)",
+) -> pd.DataFrame:
+    """
+    Use regex to extract semantic version info from oss release version string.
+    Includes 1.0 pre-releases.
+    """
+    assert (
+        type(df[colname][0]) == str
+    ), f"DataFrame column {colname} must be of type str but is of type {type(df[colname][0])}."
+
+    matches = df.version.apply(lambda x: re.search(version_regex, x))
+
+    group_map = {"major": 1, "minor": 2, "patch": 3}
+
+    for k, v in group_map.items():
+        try:
+            df[k] = [m.group(v) for m in matches]
+        except AssertionError:
+            print(
+                f"""
+                At lease one version string did not match specified regex. 
+                Setting column values for '{k}' to None.
+            """
+            )
+            df[k] = None
+
+    df.sort_values(
+        by=[k for k in group_map.keys()], ascending=[False, False, False], inplace=True
+    )
+
+    return df
+
+
+def get_releases_dataframe(release_history: list) -> pd.DataFrame:
+    if not release_history:
+        release_history = get_release_history()
+
     df = pd.DataFrame(
         [
             {
                 "version": r["tag_name"],
                 "name": r["name"],
-                "release_dt": dt_converter(r["published_at"]),
+                "release_dt": r["published_at"],
             }
             for r in release_history
         ]
     )
-    df["release_dt"] = df.release_dt.apply(lambda x: x.date())
-    df["version"] = np.where(
-        df.version.str.startswith("v"), df.version.str.replace("v", ""), df.version
-    )
-    df["version"] = np.where(df.version.str.contains("[a-f]+"), df.name, df.version)
-    df = df.query("~version.str.contains('[a-z]')").query("~release_dt.isnull()")
-    pat = r"^([0-1])\.(\d{1,2})\.(\d{1,2})"
-    matches = df.version.apply(lambda x: re.search(pat, x))
-    [m.group(1) for m in matches]
-    df["major"] = [m.group(1) for m in matches]
-    df["minor"] = [m.group(2) for m in matches]
-    df["patch"] = [m.group(3) for m in matches]
-    cols = df.columns[df.columns != "name"]
-    df = df.filter(items=cols)
-    df.sort_values(
-        by=["major", "minor", "patch"], ascending=[False, False, False], inplace=True
-    )
-    return df
+    df["release_dt"] = df.release_dt.apply(lambda x: pd.to_datetime(x))
+    df["version"] = np.where(df.version.str.contains("^untagged"), df.name, df.version)
+    df["is_yanked"] = np.where(df.name.str.contains("YANKED"), True, False)
+    df["is_pre_release"] = np.where(df.version.str.contains("[abc]"), True, False)
+    df = df[df.release_dt >= pd.to_datetime("2020-05-23T01:45:40Z")]
+    df = df.filter(items=[col for col in df.columns if not col == "name"])
+
+    return parse_semantic_version(df)
 
 
 def get_pulls_history(**kwargs):

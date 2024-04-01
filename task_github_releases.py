@@ -26,11 +26,14 @@ spark.sql(sql)
 
 sql = """
 create table if not exists github.releases (
-    version string comment "GX release version", 
+    version str comment "GX release version", 
     release_dt date comment "GX version release date",
+    is_yanked boolean comment "True if release was yanked",
+    is_pre_release boolean comment "True if tagged as pre-release version.",
     major int comment "GX version major release number <major.minor.patch>", 
     minor int comment "GX version minor release number <major.minor.patch>", 
-    patch int comment "GX version patch release number <major.minor.patch>"
+    patch int comment "GX version patch release number <major.minor.patch>", 
+    pre_release str comment "GX pre-release version"
     ) comment 'GX OSS release history'
 """
 spark.sql(sql)
