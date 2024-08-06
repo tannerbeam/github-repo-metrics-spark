@@ -1,3 +1,5 @@
+import datetime
+from etl.github.expectations import ExpectationSchemas
 from etl.github.org import Org
 from etl.github.repo import Repo
 from etl.github.contributors import Contributors
@@ -15,6 +17,7 @@ etl_repos = config.include_github_repos
 def upsert_all():
     """
     Upsert new data into all source tables.
+    Only trigger upsert for expectations once a week.
     """
     for org_name in etl_orgs:
         org = Org(org_name)
@@ -28,6 +31,10 @@ def upsert_all():
                 contributors.upsert()
                 pulls = Pulls(org_name, repo_name)
                 pulls.upsert()
+    
+    if datetime.datetime.today().weekday() == 0:
+        schemas = ExpectationSchemas()
+        schemas.upsert()
 
 
 def delete_all():
