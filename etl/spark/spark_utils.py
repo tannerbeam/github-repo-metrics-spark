@@ -90,15 +90,24 @@ def select_cols(spark_df: DataFrame, cols_to_select: list[str]) -> DataFrame:
     return spark_df.select(list(set(cols_to_select)))
 
 
-def create_temp_delta_table(temp_df: DataFrame) -> DeltaTable:
+def create_temp_delta_table(
+    temp_df: DataFrame, temp_path: str | None = None
+) -> DeltaTable:
     """
-    Create a delta table in dbfs:/tmp that can be used in SQL operations
+    Create a delta table in dbfs:/tmp/delta that can be used in SQL operations
     """
     spark = get_session()
-    temp_path = "dbfs:/tmp/tmp_delta"
-    temp_df.write.option("overwriteSchema", "True").mode("overwrite").format(
-        "delta"
-    ).save(temp_path)
+
+    # write to DBFS by default
+    if not temp_path:
+        temp_path = "dbfs:/tmp/github_api_workflow"
+
+    # rm any old files recursively and recreate dir
+    dbutils.fs.rm(temp_path, True)
+    dbutils.fs.mkdirs(temp_path)
+
+    temp_df.write.format("delta").save(temp_path)
+
     temp_delta = DeltaTable.forPath(spark, temp_path)
     temp_df_delta = temp_delta.toDF()
     return temp_df_delta
