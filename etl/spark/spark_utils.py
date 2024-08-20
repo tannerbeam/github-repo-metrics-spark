@@ -9,11 +9,9 @@ from pandas import date_range
 
 def get_session():
     """
-    Passthru active SparkSession to importable modules
+    Use databricks sdk to get spark (serverless compatible)
     """
-    session = spark.getActiveSession()
-    session.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
-    return session
+    return spark
 
 
 def get_dbutils():
