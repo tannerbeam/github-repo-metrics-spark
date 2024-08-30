@@ -7,7 +7,7 @@ from pyspark.sql.types import _parse_datatype_string as pds
 from pyspark.sql import functions as F
 from pyspark.sql import DataFrame
 
-from typing import Optional, Union, Literal
+from typing import Literal
 import datetime
 from dataclasses import dataclass
 from collections import namedtuple
@@ -20,23 +20,22 @@ rc = get_config()
 @dataclass
 class SparkTable:
     """
-    Dataclass for a Databricks Spark catalog table (.delta format) in our Hive Metastore.
-    (Note: as of April 2024, we're still not using Unity Catalog.)
+    Dataclass for a Databricks Spark catalog table (.delta format).
+    Note these are Unity-backed MANAGED tables (not EXTERNAL).
     """
 
     name: str
-    schema_definition: Optional[str] = None
+    schema_definition: str | None = None
 
     def __post_init__(self):
         self.database: str = self.get_table_namespace().database
         self.table: str = self.get_table_namespace().table
-        self.storage_path: str = self.get_storage_path()
         self.exists: bool = self.check_if_exists()
         self.columns: list[str] = self.get_columns()
         self.column_types: list[str] = self.get_column_types()
-        self.row_count: Union[int, None] = self.get_row_count()
+        self.row_count: int | None = self.get_row_count()
         self.attributes: dict[str] = {
-            k: v for k, v in self.__dict__.items() if not k in ["schema_definition"]
+            k: v for k, v in self.__dict__.items() if k not in ["schema_definition"]
         }
 
     def get_table_namespace(self) -> tuple[str]:
@@ -52,7 +51,7 @@ class SparkTable:
         db_list = [
             db.databaseName for db in list(spark.sql("show databases").collect())
         ]
-        if not db_name in db_list:
+        if db_name not in db_list:
             raise ValueError(
                 f"database '{db_name}' does not exist and must be created."
             )
@@ -60,12 +59,6 @@ class SparkTable:
         TableNamespace = namedtuple("TableNamespace", "database table")
 
         return TableNamespace(split_text[0], split_text[1])
-
-    def get_storage_path(self) -> str:
-        """
-        Get dbfs: location of delta table
-        """
-        return f"dbfs:/user/hive/warehouse/{self.database}.db/{self.table}"
 
     def check_schema_definition(self) -> None:
         """
@@ -78,7 +71,7 @@ class SparkTable:
             if not self.schema_definition.strip().startswith(sw):
                 raise ValueError(f"Schema definition statement must start with '{sw}'.")
 
-    def get_spark_schema(self) -> Union[StructType, None]:
+    def get_spark_schema(self) -> StructType | None:
         """
         Get schema as pyspark native types
         """
@@ -98,14 +91,12 @@ class SparkTable:
         )
 
     def get_columns(self) -> list[str]:
-        """ """
         if not self.exists:
             return None
         else:
             return spark.table(self.name).columns
 
     def get_column_types(self) -> dict[str, str]:
-        """ """
         if not self.exists:
             return None
         else:
@@ -118,7 +109,7 @@ class SparkTable:
         exists = True
         try:
             spark.sql(f"describe {self.name}")
-        except:
+        except Exception as e:
             exists = False
 
         return exists
@@ -137,7 +128,7 @@ class SparkTable:
         """
         Get count(distinct column_name) from table
         """
-        if not self.exists or (not column_name in self.columns):
+        if not self.exists or (column_name not in self.columns):
             return 0
         else:
             query = spark.sql(f"select count(distinct {column_name}) from {self.name}")
@@ -161,18 +152,23 @@ class SparkTable:
         if (
             not self.exists
             or (self.row_count == 0)
-            or (not column_name in self.columns)
+            or (column_name not in self.columns)
         ):
             return None
 
         else:
-            sql = f"""select {min_or_max}({column_name}) as {min_or_max}_{column_name} from {self.name}"""
+            sql = f"""
+                select 
+                    {min_or_max}({column_name}) as {min_or_max}_{column_name} 
+                from 
+                    {self.name}
+            """
 
             value = spark.sql(sql).collect()[0][0]
             value_is_datetime = isinstance(value, datetime.datetime)
             value_is_date = isinstance(value, datetime.date)
 
-            if return_datetime_as_string == True and any(
+            if return_datetime_as_string is True and any(
                 [value_is_datetime, value_is_date]
             ):
                 return (
@@ -253,22 +249,22 @@ class SparkTable:
             spark.sql(f"vacuum {self.name}")
             spark.sql(f"drop table {self.name}")
 
-    def as_dataframe(self) -> Union[DataFrame, None]:
+    def as_dataframe(self) -> DataFrame | None:
         return spark.read.table(self.name) if self.exists else None
 
-    def as_delta(self, like_df: Optional[DataFrame] = None) -> DeltaTable:
+    def as_delta(self, like_df: DataFrame | None = None) -> DeltaTable:
         """
-        Get a delta table from storage path.
+        Get and/or create a managed delta table by name.
         If not exists, create an empty table with same schema as like_df
         """
         try:
             # will raise some SQLSTATE error if not exists or is wrong format
-            delta_table = DeltaTable.forPath(spark, self.storage_path)
+            delta_table = DeltaTable.forName(spark, self.name)
         except Exception:
             # create empty delta table like source if not exists
             like_df.createOrReplaceTempView("df")
             spark.sql(f"CREATE TABLE {self.name} LIKE df USING delta")
-            delta_table = DeltaTable.forPath(spark, self.storage_path)
+            delta_table = DeltaTable.forName(spark, self.name)
 
         return delta_table
 
