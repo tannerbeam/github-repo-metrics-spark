@@ -1,5 +1,7 @@
+![Github PR Metrics Example Chart](https://github.com/tannerbeam/github-repo-metrics-spark/blob/main/chart_example.png?raw=true)
+
 # Data Workflow Github API
-Databricks Spark workflow for getting data from [GitHub REST API](https://docs.github.com/en/rest?apiVersion=2022-11-28) and loading into our Databricks data warehouse.
+Databricks Spark workflow for getting data from [GitHub REST API](https://docs.github.com/en/rest?apiVersion=2022-11-28) and loading into Databricks lakehouse tables.
 
 ## Summary
 Get source data from the following endpoints:
@@ -8,7 +10,7 @@ Get source data from the following endpoints:
 - Contributors
 - Pull Requests
 
-API response data is conditionally loaded to the `github_api` database in our Databricks warehouse using upsert logic. Basically, if any new data is encountered it's inserted into the tables and if any modified data is encountered the affected rows are overwritten.
+API response data is conditionally loaded to the `github_api` database in Databricks warehouse using upsert logic. Basically, if any new data is encountered it's inserted into the tables and if any modified data is encountered the affected rows are overwritten.
 
 ## Repo Organization
 
